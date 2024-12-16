@@ -2,7 +2,12 @@ import { FreshContext } from "$fresh/server.ts";
 import { acceptsLanguages, getCookies, setCookie } from "@std/http";
 
 import { Translation } from "../i18n/types.ts";
-import { langSignal, Language, languages, tSignal } from "../i18n/i18n.ts";
+import {
+  currentLanguageSignal,
+  Language,
+  languages,
+  tSignal,
+} from "../i18n/i18n.ts";
 
 export async function handler(
   req: Request,
@@ -11,29 +16,35 @@ export async function handler(
   const cookies = getCookies(req.headers);
   let lang: Language | null = null;
 
-  const cookieLang = cookies.lang;
-  for (const language of languages) {
-    if (language.code === cookieLang) {
-      lang = language.code;
-      break;
+  const url = new URL(req.url);
+  const queryLang = url.searchParams.get("lang") as Language | null;
+
+  if (queryLang && languages.some((l) => l.code === queryLang)) {
+    lang = queryLang;
+  }
+
+  if (!lang) {
+    const cookieLang = cookies.lang as Language;
+    if (cookieLang && languages.some((l) => l.code === cookieLang)) {
+      lang = cookieLang;
     }
   }
 
   if (!lang) {
-    const acceptLanguages = acceptsLanguages(req);
+    const acceptLanguages = acceptsLanguages(req) as Language[];
     for (const acceptLanguage of acceptLanguages) {
-      for (const language of languages) {
-        if (language.code === cookieLang) {
-          lang = acceptLanguage as Language;
-          break;
-        }
+      if (languages.some((l) => l.code === acceptLanguage)) {
+        lang = acceptLanguage;
+        break;
       }
     }
+  }
 
+  if (!lang) {
     lang = languages[0].code;
   }
 
-  langSignal.value = lang;
+  currentLanguageSignal.value = lang;
   const langModule = await import(`../locales/${lang}.json`, {
     with: { type: "json" },
   });
@@ -41,12 +52,10 @@ export async function handler(
 
   const res = await ctx.next();
 
-  if (!cookies.lang) {
-    setCookie(res.headers, {
-      name: "lang",
-      value: lang,
-    });
-  }
+  setCookie(res.headers, {
+    name: "lang",
+    value: lang,
+  });
 
   return res;
 }
